@@ -1,0 +1,2 @@
+#!/bin/sh
+PRIMUS_SYNC=2 optirun -c jpeg -b primus wine "/home/yangsheng/Downloads/Adobe Photoshop CS6/Adobe Photoshop CS6/Photoshop.exe"

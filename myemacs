@@ -1,0 +1,21 @@
+#!/bin/bash
+running=`pgrep -l emacs|grep '\<emacs\>'`
+if [ -z  "$running"  ]; then
+	emacs --daemon
+	echo "starting emacs"
+	echo "$running"
+else
+	echo "emacs daemon is running!"
+	echo "$running"
+fi
+
+running=`pgrep -l emacs|grep '\<emacs\>'`
+if [ -z "$running"  ]; then
+	echo "error"
+	echo "Emacs daemon cannot be started!"
+elif [ "$TERM" = "linux" ]; then
+	emacsclient -c 
+else
+	emacsclient -c &
+	clear
+fi

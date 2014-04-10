@@ -1,0 +1,4 @@
+#!/bin/sh
+export http_proxy='http://localhost:8087'
+export https_proxy='http://localhost:8087'
+yaourt -S 915resolution-static
