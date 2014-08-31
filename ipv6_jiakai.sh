@@ -8,11 +8,11 @@ ADDR_LOCAL=$(ip r g 8.8.8.8 | grep src | awk '{print $7}')
 ##################
 # ifconfig.me is used to get external ip addr
 ##################
-ADDR_OUT=$(curl ifconfig.me)
+# ADDR_OUT=$(curl ifconfig.me)
 ##################
 # in case ifconfig.me is not useable
 ##################
-# ADDR_OUT=$ADDR_LOCAL
+ADDR_OUT=$ADDR_LOCAL
 ADDR_REMOTE='166.111.21.1'
  
 echo "local: $ADDR_LOCAL"
