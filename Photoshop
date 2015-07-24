@@ -1,3 +1,4 @@
 #!/bin/sh
 # PRIMUS_SYNC=2 optirun -c jpeg -b primus wine "/home/yangsheng/Downloads/Adobe Photoshop CS6/Adobe Photoshop CS6/Photoshop.exe"
-__GL_THREADED_OPTIMIZATIONS=1 wine "/home/yangsheng/Downloads/Adobe Photoshop CS6/Adobe Photoshop CS6/Photoshop.exe"
+#__GL_THREADED_OPTIMIZATIONS=1 wine "/home/yangsheng/Downloads/Adobe Photoshop CS6/Adobe Photoshop CS6/Photoshop.exe"
+wine "/home/yangsheng/Downloads/Adobe Photoshop CS6/Adobe Photoshop CS6/Photoshop.exe"

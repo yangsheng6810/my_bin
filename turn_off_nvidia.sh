@@ -8,4 +8,6 @@ else
 	else
 		tee /proc/acpi/bbswitch <<<OFF
 	fi
+	state=`cat /proc/acpi/bbswitch`
+	echo "current state is ${state#* }"
 fi

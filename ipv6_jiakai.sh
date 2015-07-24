@@ -10,9 +10,14 @@ ADDR_LOCAL=$(ip r g 8.8.8.8 | grep src | awk '{print $7}')
 ##################
 # ADDR_OUT=$(curl ifconfig.me)
 ##################
+# used to get public ip addr
+# see ``http://unix.stackexchange.com/questions/22615/how-can-i-get-my-external-ip-address-in-bash'' for detail
+# it seems to be faster than ifconfig.me
+ADDR_OUT=$(dig +short myip.opendns.com @resolver1.opendns.com)
+##################
 # in case ifconfig.me is not useable
 ##################
-ADDR_OUT=$ADDR_LOCAL
+# ADDR_OUT=$ADDR_LOCAL
 ADDR_REMOTE='166.111.21.1'
  
 echo "local: $ADDR_LOCAL"
