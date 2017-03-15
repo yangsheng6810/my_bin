@@ -5,7 +5,7 @@ LOCAL_PORT=10022
 SSH_PORT=8022
 LOCAL_SSH_PORT=8022
 USER=yangsheng
-echo "$HOSTNAME"
+# echo "$HOSTNAME"
 case "$HOSTNAME" in 
     "myhost") PORT=15022
         echo "in myhost"
@@ -20,17 +20,31 @@ case "$HOSTNAME" in
 esac
 createTunnel() {
     /usr/bin/ssh -p "$SSH_PORT" -f -N \
-        -R "$PORT":localhost:"$LOCAL_SSH_PORT" \
-        -L"$LOCAL_PORT":dimlight.tk:"$SSH_PORT" dimlight.tk
+                 -R "$PORT":localhost:"$LOCAL_SSH_PORT" \
+                 dimlight.tk
+                 # -L"$LOCAL_PORT":dimlight.tk:"$SSH_PORT" \
     if [[ $? -eq 0 ]]; then
         echo Tunnel to HostA created successfully
     else
         echo An error occurred creating a tunnel to HostA. Return code: $?
     fi
 }
-/usr/bin/ssh -p "$LOCAL_PORT" "$USER"@localhost ls > /dev/null
-if [[ $? -ne 0 ]]; then
-    echo Creating new tunnel connection to HostA
-    createTunnel
+if ping -q -c 1 -W 1 8.8.8.8 > /dev/null; then
+    echo "Internet connection is working"
+    if ping -q -c 1 -W 1 dimlight.tk > /dev/null; then
+        echo "linode server available"
+        # /usr/bin/ssh -p "$LOCAL_PORT" "$USER"@localhost ls > /dev/null
+        timeout 25 /usr/bin/ssh -o ConnectTimeout=20 -o ProxyCommand="ssh -p $SSH_PORT -q dimlight.tk nc -q0 localhost $PORT" localhost ls > /dev/null
+        if [[ $? -ne 0 ]]; then
+            echo Creating new tunnel connection to HostA
+            createTunnel
+        else
+            echo tunnel already exists
+        fi
+    else
+        echo "linode server not available"
+    fi
+else
+    echo "Internet connection is not working"
 fi
 
