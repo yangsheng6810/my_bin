@@ -10,8 +10,9 @@ def main():
 
     # Define a new user having full r/w permissions and a read-only
     # anonymous user
-    authorizer.add_user('user', '12345', '.', perm='elradfmwM')
-    authorizer.add_anonymous(os.getcwd())
+    # authorizer.add_user('user', '12345', '.', perm='elradfmwM')
+    authorizer.add_user('yingguanghu', 'yingguanghu', '.', perm='elradfmwM')
+    # authorizer.add_anonymous(os.getcwd())
 
     # Instantiate FTP handler class
     handler = FTPHandler
@@ -22,8 +23,9 @@ def main():
 
     # Specify a masquerade address and the range of ports to use for
     # passive connections.  Decomment in case you're behind a NAT.
-    #handler.masquerade_address = '151.25.42.11'
-    #handler.passive_ports = range(60000, 65535)
+    # handler.masquerade_address = 'yangsheng6810.dynamic-dns.net'
+    handler.masquerade_address = '100.15.134.196'
+    handler.passive_ports = range(60000, 61000)
 
     # Instantiate FTP server class and listen on 0.0.0.0:2121
     address = ('', 2121)
@@ -31,7 +33,7 @@ def main():
 
     # set a limit for connections
     server.max_cons = 256
-    server.max_cons_per_ip = 20
+    server.max_cons_per_ip = 5
 
     # start ftp server
     server.serve_forever()
