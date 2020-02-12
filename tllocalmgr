@@ -1,0 +1,863 @@
+#!/usr/bin/perl
+use 5.010;
+use warnings;
+use strict;
+use File::Path;
+use LWP::Simple;
+require LWP::UserAgent;
+use Term::ANSIColor qw(:constants);
+use Term::ShellUI;
+use Getopt::Long;
+use lib ('tlpkg', "/var/lib/texmf/arch/tlpkg");
+use TeXLive::Arch;
+
+die "You can't run this program as root\n" if $ENV{'USER'} eq "root";
+
+# Paths
+my $TEXMFVAR = "/var/lib/texmf";
+my $INSTALLEDPKGS = "$TEXMFVAR/arch/installedpkgs";
+
+our $VERSION = "0.4.6";
+our $YEAR = "2014";
+my $CTANBASEURL="http://mirror.ctan.org/systems/texlive/tlnet";
+
+my $ROOT = "$ENV{HOME}/.texlive/texmf-var/arch";
+my $LOCALDB = "$ROOT/tlpkg/texlive.tlpdb";
+my $LOCALDBXZ = "$LOCALDB.xz";
+my $logfile = "$ROOT/tllocalmgr.log";
+
+############# Option parsing ##########
+my $opts = {};
+GetOptions( $opts,
+			'skipupdate',
+			'forceupdate',
+			'localsearch', #TODO
+			'location', #TODO ?
+			'mirror',
+			'nocolor',
+			'help|h',
+			'version|v'
+		);
+die usage(), "\n" if $opts->{'help'};
+die version(), "\n" if $opts->{'version'};
+my $skipupdate = $opts->{'skipupdate'} || 0;
+my $forceupdate = $opts->{'forceupdate'} || 0;
+my $location = $opts->{'location'} || $ROOT;
+my $mirror = $opts->{'mirror'} || $CTANBASEURL;
+$ENV{ANSI_COLORS_DISABLED} = 1 if $opts->{'nocolor'};
+my $localsearch = $opts->{'localsearch'} || 0;
+
+# Main URLs
+my $TLARCHIVE="$mirror/archive";
+my $TLPDB="$mirror/tlpkg/texlive.tlpdb.xz";
+
+$Term::ANSIColor::AUTORESET = 1; 
+my $term = new Term::ShellUI( commands => get_commands());
+$term->prompt( "tllocalmgr> " );
+
+########### INITIALIZATION ###########
+
+unless ( -d $ROOT ) {
+	system("mkdir -p $ROOT/tlpkg")
+}
+
+open LOG, ">> $logfile";
+my $initlog = 0;
+sub initlog {
+	my @lt = localtime(time);
+	print LOG "\n\n";
+	print LOG "*** ", $lt[5]+1900, " ", $lt[4], " ", $lt[3], " ", $lt[2], ":", $lt[1], ":", $lt[0], " ***\n";
+	$initlog = 1;
+}
+
+my @dbstats;
+my $ageofdb;
+if (-f $LOCALDB) {
+    @dbstats = stat($LOCALDB);# to know how old the local db is
+} else {
+    $forceupdate = 1
+}
+
+# only retrieve if local DB is older than 12 hours
+unless ($skipupdate) {
+    unless ($forceupdate) {
+    	$ageofdb = time - $dbstats[9] ;
+    }
+	if ($forceupdate || $ageofdb > 3600*12) {
+		print "Retrieving new TeXLive database from CTAN...\n";
+		initlog() unless $initlog;
+		print LOG "* Retrieving new TeXLive database from CTAN...\n\t$TLPDB";
+		my $agent = LWP::UserAgent->new;
+		my $rc = $agent->get($TLPDB, ":content_file" => $LOCALDBXZ);
+		unless ($rc->is_success) {
+			die "could not fetch $TLPDB :\n" . $rc->status_line();
+        };
+        
+		system("test -f $LOCALDB && mv $LOCALDB $LOCALDB.old");
+		system("unxz $LOCALDBXZ");
+	}
+};
+
+print GREEN, BOLD, "Initializing ...", RESET, "\n" ;
+
+### read DB
+
+my $tlpdb = new TeXLive::Arch (root => $ROOT) || die "cannot read $ROOT/tlpkg/texlive.tlpdb";
+
+my %tlpackages = $tlpdb->archpackages;
+
+my %versions = $tlpdb->archversions;
+
+# list of all packages in the database that interest us
+# i.e. less than $tlpdb->list_packages !
+my @allpackages; 
+
+my %seen = ();
+foreach my $coll (keys %tlpackages) {
+	my @tmp;
+	foreach my $pkg (@{$tlpackages{$coll}}) {
+        my $tlpkg = $tlpdb->get_package($pkg);
+		push @tmp, $tlpkg->revision;
+		unless (exists $seen{$pkg}) {
+			push @allpackages, $pkg
+		};
+		$seen{$pkg}++;
+	};
+	@tmp = sort {$a <=> $b} @tmp;
+	$versions{$coll} = pop @tmp
+}
+
+my %installedcol_pkgs; # list of packages in each installed collection
+my %installedcol_versions; # version of each installed coll
+my %installedpkg_versions; # version of each installed pkg
+my %locallyinstalledpkg_versions; # version of each locally installed pkg 
+my %locallyinstalleddoc_versions; # version of each locally installed doc pkg
+#my @installed_lists = <$INSTALLEDPKGS/*.pkgs> ;
+#my @installed_cols; # collections installed
+
+chomp(my @pacman = `pacman -Qs ^texlive- | egrep ^local | cut -d'/' -f2`);
+my @localpacman = grep { /^texlive-local-/ } @pacman;
+# To have the standard collections we get rid of 
+# texlive-local-<pkg> and texlive-localmanager:
+my @collpacman = grep { !/^texlive-local/ } @pacman; 
+
+if (@localpacman) {
+	foreach (@localpacman) {
+		my @tmp = split;
+		my $n = $tmp[0];
+		$n =~ s/^texlive-local-//;
+		my $v = $tmp[1] ;
+		$v =~ s/-[0-9]+$//;
+		if ($n =~ /-doc$/ ) {
+			$n =~ s/-doc$//;
+			$locallyinstalleddoc_versions{$n} = $v;
+		}
+		else {
+			$locallyinstalledpkg_versions{$n} = $v;
+		}
+	}
+}
+
+if (@collpacman) {
+	foreach (@collpacman) {
+		my @tmp = split;
+		my $col = $tmp[0];
+		next if $col eq 'texlive-bin';
+		$col =~ s/^texlive-//;
+		my $ver = $tmp[1];
+		$ver =~ s/[0-9]{4}\.([0-9]+)-[0-9]+$/$1/;
+		#print "debug: $col - $ver\n";
+		$installedcol_versions{$col} = $ver;
+		my @list = ();
+		unless ( -f "$INSTALLEDPKGS/texlive-$col\_$ver.pkgs" ) {
+			die "Cannot open $INSTALLEDPKGS/texlive-$col\_$ver.pkgs\n"
+		};
+		open INST, "<$INSTALLEDPKGS/texlive-$col\_$ver.pkgs" ;
+		while (<INST>) {
+			next if /^\s*$/;
+			chomp( (my $name, my $ver) = split / /, $_ );
+			$installedpkg_versions{$name} = $ver unless (exists $installedpkg_versions{$name}) ; 
+			push @list, $name;
+		};
+		close INST;
+		$installedcol_pkgs{$col} = [ @list ];
+	}
+}
+else {
+	die "Huh? You don't seem to have installed texlive on this system!\n"
+}
+
+#foreach (@installed_lists) {
+#	my ($col, $ver) = $_ =~ m/^.+\/texlive-(.+)\_(.+)\.pkgs$/;
+#	$installedcol_versions{$col} = $ver;
+#	my @tmp = ();
+#	open INST, "<$_";
+#	while (<INST>) {
+#		next if /^\s*$/;
+#	    chomp( (my $name, my $ver) = split / /, $_ );
+#		$installedpkg_versions{$name} = $ver unless (exists $installedpkg_versions{$name}) ; 
+#		push @tmp, $name;
+#	};
+#	close INST;
+#	$installedcol_pkgs{$col} = [ @tmp ];
+#}
+
+my %collectionsbypkg; # collection to which belongs each pkg
+
+foreach my $col (keys %tlpackages) {
+	next if $col =~ /-doc$/;
+	foreach my $pkg (@{$tlpackages{$col}}) {
+		$collectionsbypkg{$pkg} = $col
+	}
+}
+
+# TODO 
+#my %doccollectionsbypkg; # doc collection to which belongs each pkg
+#foreach my $col (keys %tlpackages) {
+#	next unless $col =~ /-doc$/;
+#	foreach my $pkg (@{$tlpackages{$col}}) {
+#		$doccollectionsbypkg{$pkg} = $col
+#	}
+#}
+
+my %updatedcol_pkgs; # pkgs for which updates are available, by collection
+my @updatedpkgs; # pkgs for which updates are available
+
+foreach my $col (sort keys %installedcol_versions) {
+	#my $installedver = `pacman -Q texlive-$col`;
+	#$installedver =~ s/texlive-$col $YEAR\.([0-9]+)-.+/$1/;
+	next unless ( $installedcol_versions{$col} < $versions{$col} ) ;
+	foreach my $pkg (sort @{$tlpackages{$col}}) {
+        my $tlpkg = $tlpdb->get_package($pkg);
+		my $newver = $tlpkg->revision;
+		if ( exists $installedpkg_versions{$pkg} ) {
+			my $oldver = $installedpkg_versions{$pkg} ;
+			if ($newver > $oldver) {
+				push @{$updatedcol_pkgs{$col}}, $pkg;
+				push @updatedpkgs, $pkg;
+			}
+		} else { # new pkg
+			push @{$updatedcol_pkgs{$col}}, $pkg;
+			push @updatedpkgs, $pkg;
+		};
+	}
+}
+
+my @pkglist;
+if ( $localsearch ) {
+   @pkglist = keys %installedpkg_versions
+} else {
+   @pkglist = @allpackages
+};
+
+##############################################
+
+no strict 'refs';
+if (@ARGV) {
+	my $cmd = shift @ARGV;
+	my $runcmd = "run_$cmd";
+	if ($cmd =~ /^(help|usage)/ ) {
+		print usage(); 
+	} 
+	else {
+		eval { &$runcmd(@ARGV) };
+		die "Error: command $cmd is not defined\n" if $@;
+		exit 0 unless $cmd eq 'status';
+	}
+}
+
+print "Welcome to the TeXLive Local Manager shell. Type 'help' for assistance.\n";
+
+########### END OF INITIALIZATION ###########
+
+$term->run();
+
+sub get_commands
+{
+	return {
+		"status" => { desc => "Current status of TeXLive installation",
+                      proc => \&run_status }, 
+		"install" => { desc => "Locally install new CTAN packages",
+					  args => \&complete_pkgname ,
+					  minargs => 1,
+                      proc => sub { run_install(@_) } }, 
+		"installdoc" => { desc => "Locally install documentation of CTAN packages",
+					  args => \&complete_pkgname ,
+					  minargs => 1,
+                      proc => sub { run_installdoc(@_) } }, 
+		"installsrc" => { desc => "Locally install sources of CTAN packages",
+					  args => \&complete_pkgname ,
+					  minargs => 1,
+                      proc => sub { run_installsrc(@_) } }, 
+		"update" => { desc => "Locally update CTAN packages",
+					  args => \&complete_pkgname ,
+					  minargs => 1,
+                      proc => sub { run_update(@_) } }, 
+		"?" =>		{ alias => "help" },
+		"h" =>		{ alias => "help", exclude_from_completion=>1 },
+		"help" => 	{ desc => "Print helpful information",
+					  args => sub { shift->help_args(undef, @_); },
+					  method => sub { shift->help_call(undef, @_); } }, 
+		"usage" => 	{ desc => "Print more detailed help",
+					  maxargs => 0,
+					  proc => sub { print usage() } },
+		"quit" =>	{ desc => "Quit tllocalmgr",
+					  maxargs => 0,
+                      method => sub { shift->exit_requested(1); } }, 
+		"q" =>		{ alias => "quit" },
+		"exit" =>	{ alias => "quit" },
+		"clean" =>	{ desc => "Clean local build tree",
+					  proc => \&run_clean },
+		"info"	=>  { desc => "Print info on CTAN packages",
+					  args => \&complete_pkgname ,
+					  minargs => 1,
+                      proc => sub { run_info(@_) } },
+		"shortinfo"	=>  { desc => "Print a one-liner description of CTAN packages",
+					  args => \&complete_pkgname ,
+					  minargs => 1,
+                      proc => sub { run_shortinfo(@_) } },
+		"listfiles"	=>  { desc => "List all files in CTAN packages",
+					  args => \&complete_pkgname ,
+					  minargs => 1,
+                      proc => sub { run_listfiles(@_) } },
+		"search"	=>  { desc => "Search info on CTAN packages",
+					  minargs => 1,
+                      proc => sub { run_search(@_) } },
+		"s" =>		{ alias => "search" },
+		"searchfiles" =>  { desc => "Search for files in CTAN packages",
+					  minargs => 1,
+                      proc => sub { run_searchfiles(@_) } },
+		"sf" =>		{ alias => "searchfiles" },
+		"texhash" => { desc => "Refresh the TeX file database",
+					   maxargs => 0,
+					   proc => sub { system('sudo texhash') } }
+	};
+}
+
+sub echo {
+	print @_, "\n"
+}
+
+sub warning {
+	print RED @_, "\n"
+}
+
+sub run_clean {
+	print "Are you sure? (y/N) > ";
+	chomp(my $choice = <STDIN>) ;
+	rmtree("$ROOT/builds") if $choice =~ m/^y/i ;
+}
+
+sub run_status {
+	initlog() unless $initlog;
+	print LOG "* List of updated or new packages for each collection:\n";
+
+	foreach my $col (sort keys %updatedcol_pkgs) {
+		print LOG " - texlive-$col :\n";
+		print BOLD RED "texlive-$col :\n";
+    my $colver = $installedcol_versions{$col};
+		foreach my $pkg (sort @{$updatedcol_pkgs{$col}}) {
+			next if $locallyinstalledpkg_versions{$pkg};
+			my $newver = $tlpdb->package_revision($pkg);
+			if ( $installedpkg_versions{$pkg} ) {
+				my $oldver = $installedpkg_versions{$pkg} ;
+				if ($newver > $oldver && $newver > $colver) {
+					print GREEN, "\t$pkg", RESET, " has been updated ($oldver => $newver)\n";
+					print LOG "\t$pkg has been updated ($oldver => $newver)\n";
+				}
+			} 
+			else {
+					print GREEN, "\t$pkg", RESET, " is new!\n";
+					print LOG "\t$pkg is new (as of rev $newver)\n";
+			}
+		}
+	};
+	my @locpkgs = keys %locallyinstalledpkg_versions; 
+	if (@locpkgs) {
+		print BOLD RED "Locally installed packages:", RESET, "\n";
+		print LOG " - locally installed packages :\n";
+		my $count = 0;
+		foreach my $pkg (sort @locpkgs) {
+			my $localver = $locallyinstalledpkg_versions{$pkg};
+            my $tlpkg = $tlpdb->get_package($pkg);
+            my $newver = $tlpkg->revision || "0";
+			print LOG "Warning: revision of $pkg is problematic\n" if $newver eq '0';
+			if ( $newver > $localver ) {
+				$count++;
+				print GREEN, "\t$pkg", RESET, " has been updated ($localver => $newver)\n";
+				print LOG "\t$pkg has been updated ($localver => $newver)\n";
+			}
+		};
+		print "\t(No updates)\n" unless $count;
+	};
+	my @locdocs = keys %locallyinstalleddoc_versions; 
+	if (@locdocs) {
+		print BOLD RED "Locally installed doc packages:", RESET, "\n";
+		print LOG " - locally installed doc packages :\n";
+		my $count = 0;
+		foreach my $pkg (sort @locdocs) {
+			my $localver = $locallyinstalleddoc_versions{$pkg};
+            my $tlpkg = $tlpdb->get_package($pkg);
+            my $newver = $tlpkg->revision || "0";
+			print LOG "Warning: revision of $pkg is problematic\n" if $newver eq '0';
+			if ( $newver > $localver ) {
+				$count++;
+				print GREEN, "\t$pkg", RESET, " has been updated ($localver => $newver)\n";
+				print LOG "\t$pkg has been updated ($localver => $newver)\n";
+			}
+		};
+		print "\t(No updates)\n" unless $count;
+	}
+}
+
+sub run_install {
+	foreach (@_) {
+        my $tlpkg  = $tlpdb->get_package($_);
+        my $pkgrev = $tlpkg->revision;
+		if ( $locallyinstalledpkg_versions{$_} ) {
+			echo "$_ is already installed with texlive-local-$_";
+			if ($locallyinstalledpkg_versions{$_} == $pkgrev) {
+				echo "and it is uptodate"
+			} else {
+				print "Do you want to update it locally? (Y/n) > " ;
+				chomp(my $choice = <STDIN>) ;
+				next if $choice =~ m/^n/i;
+				makepkg($_);
+			}
+		}
+		elsif ( $installedpkg_versions{$_} ) {
+			echo "$_ is already installed with texlive-$collectionsbypkg{$_}";
+			if ($installedpkg_versions{$_} == $pkgrev) {
+				echo "and it is uptodate"
+			} else { 
+				#TODO check if it was already locally installed
+				print "Do you want to update it locally? (Y/n) > " ;
+				chomp(my $choice = <STDIN>) ;
+				next if $choice =~ m/^n/i;
+				makepkg($_);
+			}
+		} elsif (! $pkgrev) {
+			warning "$_ is unknown" ;
+			next ;
+		} else {
+			#TODO check if texlive-local-$_ was already locally installed
+			makepkg($_)
+		}
+   }
+}
+
+sub run_installdoc {
+	foreach (@_) {
+        my $tlpkg  = $tlpdb->get_package($_);
+        my $pkgrev = $tlpkg->revision;
+		if ( $locallyinstalleddoc_versions{$_} ) {
+			echo "$_ is already installed with texlive-local-$_-doc";
+			if ($locallyinstalleddoc_versions{$_} == $pkgrev) {
+				echo "and it is uptodate"
+			} else {
+				print "Do you want to update it locally? (Y/n) > " ;
+				chomp(my $choice = <STDIN>) ;
+				next if $choice =~ m/^n/i;
+				makepkgdoc($_);
+			}
+		}
+		elsif (! $pkgrev) {
+			warning "$_ is unknown" ;
+			next ;
+		} 
+		else {
+			makepkgdoc($_)
+		}
+   }
+}
+
+sub run_installsrc {
+	echo 'Sorry, not implemented yet'
+}
+
+sub run_update {
+	foreach (@_) {
+        my $tlpkg  = $tlpdb->get_package($_);
+        my $pkgrev = $tlpkg->revision;
+		if ( $locallyinstalledpkg_versions{$_} ) {
+			echo "$_ is already installed with texlive-local-$_";
+			if ($locallyinstalledpkg_versions{$_} == $pkgrev) {
+				echo "and it is uptodate"
+			} else {
+				print "Do you want to update it locally? (Y/n) > " ;
+				chomp(my $choice = <STDIN>) ;
+				next if $choice =~ m/^n/i;
+				makepkg($_);
+			}
+		}
+		elsif ( $installedpkg_versions{$_} ) {
+			echo "$_ is already installed with texlive-$collectionsbypkg{$_}";
+			if ($installedpkg_versions{$_} == $pkgrev) {
+				echo "and it is uptodate"
+			} else { 
+				print "Do you want to update it locally? (Y/n) > " ;
+				chomp(my $choice = <STDIN>) ;
+				next if $choice =~ m/^n/i;
+				makepkg($_);
+			}
+		} elsif (! $pkgrev) {
+			warning "$_ is unknown" ;
+			next ;
+		} else {
+			echo "$_ is not installed" ;
+			print "Do you want to update it locally? (Y/n) > " ;
+			chomp(my $choice = <STDIN>) ;
+			next if $choice =~ m/^n/i;
+			makepkg($_);
+		}
+   }
+}
+
+sub run_shortinfo {
+	foreach (@_) {
+		my $pkg = $tlpdb->get_package($_);
+		if ($pkg) {
+			print BOLD, GREEN, $_, RESET, ": ", $pkg->shortdesc, "\n";
+		} else {
+			warning "$_ is unknown";
+		}
+	}
+}
+
+sub run_info {
+	foreach (@_) {
+		my $pkg = $tlpdb->get_package($_);
+		if ($pkg) {
+			print BOLD, BLUE, $_, RESET, ":\n";
+        	print CYAN, "  Category: ", RESET, $pkg->category, "\n";
+	        print CYAN, "  ShortDesc: ", RESET, $pkg->shortdesc, "\n" if ($pkg->shortdesc);
+    	    print CYAN, "  LongDesc: ", RESET, $pkg->longdesc, "\n" if ($pkg->longdesc);
+    	    print CYAN, "  Size: ", RESET, $pkg->containersize, "\n" if ($pkg->containersize);
+			print CYAN, "  Collection: ", RESET, "texlive-", $collectionsbypkg{$_}, "\n" if $collectionsbypkg{$_};
+        	print CYAN, "  Revision: ", RESET, $pkg->revision , "\n" if ($pkg->revision);
+			if ($locallyinstalledpkg_versions{$_}) { 
+				my $ver = $locallyinstalledpkg_versions{$_};
+        		print CYAN, "  Installed: ", RESET, "Yes (as texlive-local-$_ version $ver)\n"
+			}
+			else {
+        		print CYAN, "  Installed: ", RESET, 
+				(exists $installedpkg_versions{$_} ? "Yes\n" : "No\n")
+			};
+	        print "\n";
+		} else {
+			warning "$_ is unknown";
+		}
+	}
+}
+
+sub run_listfiles {
+	foreach (@_) {
+		my $pkg = $tlpdb->get_package($_);
+		if ($pkg) {
+			my @allfiles = $pkg->all_files;
+			print BOLD, BLUE, $_, RESET, ":\n";
+			foreach (@allfiles) {
+				print "\t", $_, "\n";
+			};
+	        print "\n";
+		} else {
+			warning "$_ is unknown";
+		}
+	}
+}
+
+sub run_search {
+  my $r = shift;
+  my $ret = "";
+  my @pkglist;
+  if ( $localsearch ) {
+	  @pkglist = keys %installedpkg_versions
+  } else {
+	  @pkglist = $tlpdb->list_packages
+  };
+  foreach my $pkg (@pkglist) {
+      next if ($pkg =~ m/\./);
+      my $t = $tlpdb->get_package($pkg)->shortdesc;
+      $t |= "";
+      my $lt = $tlpdb->get_package($pkg)->longdesc;
+      $lt |= "";
+      if (($pkg =~ m/$r/) || ($t =~ m/$r/) || ($lt =~ m/$r/)) {
+        $ret .= " $pkg - $t\n";
+      }
+    }
+  print $ret;
+}
+
+sub run_searchfiles {
+  my $r = shift ;
+  foreach my $pkg (@pkglist) {
+      my @ret = grep(m;$r;, $tlpdb->get_package($pkg)->all_files);
+      if (@ret) {
+        print BOLD BLUE "$pkg:\n";
+        foreach (@ret) {
+          print "\t$_\n";
+        }
+      }
+    }
+}
+
+sub makepkg {
+	my @stack = @_;
+	
+	initlog() unless $initlog;
+	print LOG "* Preparing to make the following packages:\n";
+	print LOG "\t", join(", ", @stack), "\n\n";
+
+	foreach my $pkg (@stack) {
+        my $tlpkg  = $tlpdb->get_package($pkg);
+		if ( ! defined $tlpkg ) {
+			print RED "Warning: $pkg does not exist\n";
+			print LOG "Warning: $pkg does not exist\n";
+			next;
+		};
+		mkpath( "$ROOT/builds/$pkg", { mode => 0755 });
+		open PKGBUILD, "> $ROOT/builds/$pkg/PKGBUILD";
+        my $newver = $tlpkg->revision;
+		my $col = $collectionsbypkg{$pkg};
+		my $pkgmd5 = $tlpkg->containermd5;
+		#TODO download it first and compare the md5sum
+		#     if it differs ask the user if the PKGBUILD 
+		#     should be adjusted
+		print PKGBUILD <<"EOF"
+# Generated by tllocalmgr
+pkgname=texlive-local-$pkg
+pkgver=$newver
+pkgrel=1
+pkgdesc="TeX Live - local installation of CTAN package $pkg"
+license=('GPL')
+arch=('any')
+depends=('texlive-core')
+conflicts=('texlive-$col>=$YEAR.$newver')
+url='http://tug.org/texlive/'
+source=('$TLARCHIVE/$pkg.tar.xz')
+md5sums=($pkgmd5)
+
+package() {
+   cd \$srcdir
+   rm -rf tlpkg
+   install -m775 -d \$pkgdir/usr/local/share/texmf
+   wanteddirs=\$(for d in *; do test -d \$d && [[ \$d != texmf* ]] && echo \$d; done) || true
+   for dir in \$wanteddirs; do
+     find \$dir -type d -exec install -d -m775 \$pkgdir/usr/local/share/texmf/'{}' \\;
+     find \$dir -type f -exec install -m664 '{}' \$pkgdir/usr/local/share/texmf/'{}' \\;
+   done
+   for dir in texmf-dist texmf-doc; do
+      if [[ -d \$dir ]]; then
+        cd \$dir
+        find . -type d -exec install -d -m775 \$pkgdir/usr/local/share/texmf/'{}' \\;
+        find . -type f -exec install -m664 '{}' \$pkgdir/usr/local/share/texmf/'{}' \\;
+        cd ..
+      fi
+   done
+   if [[ -d \$pkgdir/usr/local/share/texmf/scripts ]]; then
+     find \$pkgdir/usr/local/share/texmf/scripts -type f -exec chmod a+x '{}' \\;
+   fi
+}
+EOF
+	;
+		close PKGBUILD;
+		print LOG "* Created $ROOT/builds/$pkg/PKGBUILD\n";
+	#	open INSTALL, "> $ROOT/builds/$pkg/texlive.install";
+	#	print INSTALL $TLINSTALL;
+	#	close INSTALL;
+		print LOG "* Running makepkg -ci on $ROOT/builds/$pkg/PKGBUILD\n";
+		chdir "$ROOT/builds/$pkg";
+		system( "test -f $pkg.tar.xz && rm $pkg.tar.xz" );
+		# TODO : catch error if makepkg fails
+		system( "makepkg -ci" );
+	}
+
+	print "\n>>> Finished. Don't forget to run 'texhash' to update your file database.\n";
+	#system ( "sed -i '/^$pkg /d' $INSTALLEDPKGS/texlive-local.pkgs" );
+	#system ( "echo $pkg $newver >> $INSTALLEDPKGS/texlive-local.pkgs" ); 
+
+	my @execlines;
+	foreach my $pkg (@stack) {
+		push @execlines, $tlpdb->get_package($pkg)->executes if $tlpdb->get_package($pkg)->executes;
+	}
+
+	if (@execlines) {
+		print   ">>> Also make sure to update /usr/share/texmf-config/web2c/updmap.cfg in\n";
+		print   "    case you have installed new fonts or fonts with a different map file.\n";
+		print   "    Look at the log file for details.\n";
+		print LOG "* Lines that can be added to /usr/share/texmf-config/web2c/updmap.cfg if needed:\n";
+		foreach my $line (@execlines) {
+			print LOG "\t", $line, "\n"
+		};
+		print LOG "(Make sure to run updmap-sys to activate them).\n";
+	close LOG;
+	}
+}
+
+sub makepkgdoc {
+	my @stack = @_;
+	
+	initlog() unless $initlog;
+	print LOG "* Preparing to make the following packages:\n";
+	print LOG "\t", join(", ", @stack), "\n\n";
+
+	foreach my $pkg (@stack) {
+		if ( ! defined $tlpdb->package_revision($pkg) ) {
+			print RED "Warning: $pkg does not exist\n";
+			print LOG "Warning: $pkg does not exist\n";
+			next;
+		};
+		mkpath( "$ROOT/builds/$pkg-doc", { mode => 0755 });
+		open PKGBUILD, "> $ROOT/builds/$pkg-doc/PKGBUILD";
+		my $newver = $tlpdb->package_revision($pkg);
+		#TODO check if md5sums are defined in the database
+		#TODO download it first and compare the md5sums
+		#     if they differ ask the user if the PKGBUILD 
+		#     should be adjusted
+		my $docpkgmd5 = $tlpdb->get_package($pkg)->doccontainermd5;
+		my $srcpkgmd5 = $tlpdb->get_package($pkg)->srccontainermd5;
+		print PKGBUILD <<"EOF"
+# Generated by tllocalmgr
+pkgname=texlive-local-$pkg-doc
+pkgver=$newver
+pkgrel=1
+pkgdesc="TeX Live - local installation of CTAN package $pkg (documentation and sources)"
+license=('GPL')
+arch=('any')
+depends=('texlive-core')
+url='http://tug.org/texlive/'
+EOF
+		;
+		if ($srcpkgmd5) { 
+			print PKGBUILD <<"EOF"
+source=('$TLARCHIVE/$pkg.doc.tar.xz' '$TLARCHIVE/$pkg.source.tar.xz')
+md5sums=('$docpkgmd5' '$srcpkgmd5')
+EOF
+		} else {
+		print PKGBUILD <<"EOF"
+source=('$TLARCHIVE/$pkg.doc.tar.xz')
+md5sums=('$docpkgmd5')
+EOF
+        };
+		print PKGBUILD <<"EOF"
+package() {
+   cd \$srcdir
+   rm -rf tlpkg
+   install -m775 -d \$pkgdir/usr/local/share/texmf
+   wanteddirs=\$(for d in *; do test -d \$d && [[ \$d != texmf* ]] && echo \$d; done) || true
+   for dir in \$wanteddirs; do
+     find \$dir -type d -exec install -d -m775 \$pkgdir/usr/local/share/texmf/'{}' \\;
+     find \$dir -type f -exec install -m664 '{}' \$pkgdir/usr/local/share/texmf/'{}' \\;
+   done
+   for dir in texmf-dist texmf-doc; do
+      if [[ -d \$dir ]]; then
+        cd \$dir
+        find . -type d -exec install -d -m775 \$pkgdir/usr/local/share/texmf/'{}' \\;
+        find . -type f -exec install -m664 '{}' \$pkgdir/usr/local/share/texmf/'{}' \\;
+        cd ..
+      fi
+   done
+   if [[ -d \$pkgdir/usr/local/share/texmf/scripts ]]; then
+     find \$pkgdir/usr/local/share/texmf/scripts -type f -exec chmod a+x '{}' \\;
+   fi
+}
+EOF
+	;
+		close PKGBUILD;
+		print LOG "* Created $ROOT/builds/$pkg-doc/PKGBUILD\n";
+	#	open INSTALL, "> $ROOT/builds/$pkg/texlive.install";
+	#	print INSTALL $TLINSTALL;
+	#	close INSTALL;
+		print LOG "* Running makepkg -ci on $ROOT/builds/$pkg-doc/PKGBUILD\n";
+		chdir "$ROOT/builds/$pkg-doc";
+		system( "test -f $pkg-*.tar.xz && rm $pkg-*.tar.xz" );
+		# TODO : catch error if makepkg fails
+		system( "makepkg -ci" );
+		}
+	
+
+	print "\n>>> Finished. Don't forget to run 'texhash' to update your file database.\n";
+	#system ( "sed -i '/^$pkg /d' $INSTALLEDPKGS/texlive-local-doc.pkgs" );
+	#system ( "echo $pkg $newver >> $INSTALLEDPKGS/texlive-local-doc.pkgs" ); 
+}
+
+sub complete_pkgname {
+
+	my $self = shift;
+	my $cmpl = shift;
+
+	my $pkg = $cmpl->{args}->[0];
+	return [] unless $pkg;
+
+	#$pkg =~ s/^(["'])(.*)\1$/$2/;	# trim surrounding quotes
+	my @cset = grep { m/^$pkg.+/i } @pkglist;
+
+	if (@cset) {
+		return [ @cset ];
+	} else {
+		if ($cmpl->{twice}) {
+			$self->completemsg("\nNo pkg found for $pkg\n");
+		}
+	}
+	return undef;
+}
+
+sub usage {
+    qq[ 
+Usage: tllocalmgr  
+       tllocalmgr [options] [command] [args]
+
+       Running tllocalmgr alone starts the TeXLive local manager shell 
+       for Arch Linux. This shell is capable of command-line completion!
+       There you can look at the available updates with the command 'status' 
+       and you can install individual CTAN packages using 'install' or 'update'
+       under \$TEXMFLOCAL. This is done by creating a package texlive-local-<pkg>
+       and installing it with pacman. Note that this won’t interfere with your 
+       standard texlive installation, but files under \$TEXMFLOCAL will take
+       precedence.  
+       
+       Here are the commands available in the shell:
+
+Commands:       
+              status   --   Current status of TeXLive installation
+           shortinfo * --   Print a one-liner description of CTAN packages
+                info * --   Print info on CTAN packages
+              update * --   Locally update CTAN packages
+             install * --   Locally install new CTAN packages
+          installdoc * --   Locally install documentation of CTAN packages
+          installsrc * --   Locally install sources of CTAN packages
+           listfiles * --   List all files in CTAN packages
+              search * --   Search info on CTAN packages
+         searchfiles * --   Search for files in CTAN packages
+             texhash   --   Refresh the TeX file database
+               clean   --   Clean local build tree
+                help   --   Print helpful information
+                quit   --   Quit tllocalmgr
+
+        The commands followed by * take one of more package names as arguments.
+        Note that these can be completed automatically by pressing TAB.
+
+        You can also run tllocalmgr as a standard command-line program, with
+        one of the above commands as argument, then the corresponding task will
+        be performed and the program will exit (except when the command is 'status').
+
+        tllocalmgr accepts the following options:
+
+Options:     --help          Shows this help
+             --version       Show the version number
+             --forceupdate   Force updating the TeXLive database
+             --skipupdate    Skip updating the TeXLive database
+             --localsearch   Search only installed packages
+             --location      #TODO?
+             --mirror        CTAN mirror to use (default is mirror.ctan.org)
+             --nocolor       #TODO
+]
+}
+
+sub version {
+    qq[ 
+tllocalmgr:  version $VERSION
+	]
+}
+
+# vim: set ts=4 sw=4 noet:

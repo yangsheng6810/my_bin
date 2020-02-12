@@ -3,4 +3,4 @@
 # export https_proxy='http://localhost:8087'
 export http_proxy=socks5://yangsheng@localhost:8883
 export https_proxy=socks5://yangsheng@localhost:8883
-yaourt -S deluge-git
+yaourt -S overture
