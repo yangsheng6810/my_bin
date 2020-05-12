@@ -5,6 +5,7 @@ fi
 GIT_URL=$(${GIT} remote get-url origin)
 if [[ $GIT_URL == *"dimlight.ml"* ]]; then
     GIT_REPO_NAME="${GIT_URL##*/}"
+    GIT_REPO_NAME="${GIT_REPO_NAME##*:}"
     echo "Updating $GIT url"
     NEW_GIT_REPO="ssh://git@racks.dimlight.net:8022/${GIT_REPO_NAME}"
     echo "from: $GIT_URL"
