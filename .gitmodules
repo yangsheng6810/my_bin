@@ -1,3 +1,6 @@
 [submodule ".yadm-project"]
 	path = .yadm-project
 	url = https://github.com/TheLocehiliosan/yadm.git
+[submodule ".pia"]
+	path = .pia
+	url = https://github.com/d4rkcat/pia.git

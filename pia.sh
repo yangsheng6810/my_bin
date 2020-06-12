@@ -1,1 +1,1 @@
-../git/pia/pia.sh
+.pia/pia.sh
