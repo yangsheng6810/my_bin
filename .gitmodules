@@ -4,3 +4,9 @@
 [submodule ".hsxkpasswd"]
 	path = .hsxkpasswd
 	url = https://github.com/bbusschots/hsxkpasswd.git
+[submodule ".pia"]
+	path = .pia
+	url = https://github.com/d4rkcat/pia.git
+[submodule ".evm"]
+	path = .evm
+	url = https://github.com/rejeep/evm.git

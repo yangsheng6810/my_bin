@@ -1,4 +1,6 @@
 #!/bin/bash
+# -*- mode: sh-mode; -*-
 
 i3-msg "split toggle; layout tabbed"
-$@
+"$@"
+i3-msg "move up"
