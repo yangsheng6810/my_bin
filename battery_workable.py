@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 # coding=UTF-8
+#
+# A script for showing battery power for shell prompt
 
 # import math
 import sys
 
 def myceil(x):
-	if (x > int(x)):
-		return int(x)+1
-	else:
-		return int(x)
+    if x > int(x):
+        return int(x)+1
+    else:
+        return int(x)
 
 preffix = "/sys/class/power_supply/"
 
-ac = int(open(preffix+"AC/online","r").read())
-battery_now = int(open(preffix+"BAT0/energy_now","r").read())
-battery_full = int(open(preffix+"BAT0/energy_full","r").read())
+ac = int(open(preffix+"AC/online", "r").read())
+battery_now = int(open(preffix+"BAT0/energy_now", "r").read())
+battery_full = int(open(preffix+"BAT0/energy_full", "r").read())
 ratio = battery_now/battery_full
-if ac>0 :
-	ac_out = "[AC]"
+if ac > 0:
+    ac_out = "[AC]"
 else:
-	ac_out = "[BAT]"
+    ac_out = "[BAT]"
 
 #Output
 total_slots = 10
@@ -52,4 +54,3 @@ color_out = (
 
 out = color_out + out + ac_out+color_reset
 sys.stdout.write(out)
-

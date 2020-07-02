@@ -1,4 +1,5 @@
 #!/bin/bash
+# update git remote from dimlight.ml to racks.dimlight.net
 if [ -z $GIT ]; then
     GIT="git"
 fi
