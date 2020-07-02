@@ -10,7 +10,9 @@ with open(input_file, "r") as i_file:
 soup = BeautifulSoup(content, features="lxml")
 for br in soup.find_all("br"):
     br.replace_with("\n")
-title_find = soup.find_all("h3")
+title_find = soup.find_all("h1", {"class": "entry-title"})
+if not title_find:
+    title_find = soup.find_all("h3")
 if not title_find:
     title_find = soup.find_all("h2")
 if not title_find:
@@ -19,7 +21,9 @@ if not title_find:
     title_find = soup.find_all("div", {"class": "title_page"})
 title = title_find[0].text
 
-body_find = soup.find_all("p", {"class":"articlecontent"})
+body_find = soup.find_all("div", {"class":"entry-content"})
+if not body_find:
+    body_find = soup.find_all("p", {"class":"articlecontent"})
 if not body_find:
     body_find = soup.find_all("div", {"id":"_chapter"})
 if not body_find:
@@ -32,8 +36,8 @@ if not body_find:
     body_find = soup.find_all("div", {"class":"content"})
 body = body_find[0].text
 
-output_file = "out_" + input_file
-# output_file = title + ".txt"
+# output_file = "out_" + input_file
+output_file = title + ".txt"
 with open(output_file, "w") as o_file:
     print("-"*30, file=o_file)
     print(title, file=o_file)
