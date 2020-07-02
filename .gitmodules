@@ -10,3 +10,6 @@
 [submodule ".evm"]
 	path = .evm
 	url = https://github.com/rejeep/evm.git
+[submodule ".i3-layout-manager"]
+	path = .i3-layout-manager
+	url = https://github.com/klaxalk/i3-layout-manager.git
