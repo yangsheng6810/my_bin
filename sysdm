@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# run `sudo yadm init -w / -Y /etc/yadm` to init
+# create an alias to run yadm for system files
+# ref https://stackoverflow.com/questions/54842380/how-do-i-use-my-personal-git-config-when-committing-as-root
+
+sudo env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" yadm -c "include.path=${XDG_CONFIG_DIR:-$HOME/.config}/git/config" -c "include.path=$HOME/.gitconfig" -Y /etc/yadm "$@"
