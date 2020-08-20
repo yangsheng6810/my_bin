@@ -38,7 +38,7 @@
 ####################### USER CONFIGURATION START #######################
 
 # address where the output of the jobs will be emailed to.
-EMAIL_ADDRESS="yangsheng6810@gmail.com"
+EMAIL_ADDRESS="styang@fastmail.com"
 
 # Set the threshold of deleted files to stop the sync job from running.
 # NOTE that depending on how active your filesystem is being used, a low
