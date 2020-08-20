@@ -5,7 +5,11 @@
 # Sleep for 5 seconds. If you are starting more than one tmux session 
 #   "at the same time", then make sure they all sleep for different periods
 #   or you can experience problems
-/bin/sleep 5
+timeout 5s nslookup www.google.com > /dev/null 2>&1
+while [ "$?" -ne "0" ];do
+    sleep 20
+    timeout 5s nslookup www.google.com > /dev/null 2>&1
+done
 source $HOME/.shell/load.sh
 
 SESSION_NAME=mystartup
