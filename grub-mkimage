@@ -1,0 +1,22 @@
+#!/bin/bash
+
+CONFIG=$(mktemp /tmp/grub-config.XXXXX)
+cat >"$CONFIG" <<EOF
+cryptomount -u a079fcfc-a9c3-4bb2-960c-e255e5805377 #(where XXX=the UUID of your Arch encrypted / partition, in my case:  /dev/sda7)# 
+
+set prefix=(lvm/MyVolGroup-root)/boot/grub
+set root=lvm/MyVolGroup-root
+
+insmod normal
+normal
+EOF
+
+grub-mkimage \
+    -p '(lvm/MyVolGroup-root)/boot/grub' \
+    -O x86_64-efi \
+    -c "$CONFIG" \
+    -o /tmp/image \
+    luks2 lvm btrfs part_gpt cryptodisk gcry_rijndael pbkdf2 gcry_sha256
+
+rm "$CONFIG"
+
