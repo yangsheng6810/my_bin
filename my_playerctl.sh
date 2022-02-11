@@ -6,12 +6,19 @@
 
 NETEASE_PID=$(pgrep netease)
 MPV_PID=$(pgrep mpv)
+YESPLAYMUSIC_PID=$(pgrep yesplaymusic)
 if [ -n "$MPV_PID" ]; then
-    playerctl --player=mpv $1
-else
-    if [ -n "$NETEASE_PID" ]; then
-        playerctl --player=netease-cloud-music $1
-    else
-        playerctl $1
-    fi
+    playerctl --player=mpv "$1"
+    exit
 fi
+if [ -n "$YESPLAYMUSIC_PID" ]; then
+   playerctl --player=yesplaymusic "$1"
+   exit
+fi
+if [ -n "$NETEASE_PID" ]; then
+   playerctl --player=netease-cloud-music "$1"
+   exit
+fi
+
+# no match
+playerctl "$1"
